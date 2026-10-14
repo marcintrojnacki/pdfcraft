@@ -809,6 +809,22 @@
 	Choose the digital ID that you want to use for signing:	Қол қою үшін пайдаланғыңыз келетін цифрлық ID-ді таңдаңыз:
 	Keychain  ·  	Кілттер бауы  ·  
 	Windows store  ·  	Windows қоймасы  ·  
+	the certificate expired on {date}	сертификаттың мерзімі {date} күні аяқталды
+	Choose the module's library file.	Модульдің кітапхана файлын таңдаңыз.
+	{file}: there is no such file.	{file}: мұндай файл жоқ.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Модуль токендерінде PdfCraft қол қоя алатын цифрлық ID жоқ.
+	The device's digital ID isn't available any more; start signing again to list it.	Құрылғының цифрлық ID-і енді қолжетімсіз; оны тізімде көру үшін қол қоюды қайта бастаңыз.
+	Enter the device's PIN.	Құрылғының PIN кодын енгізіңіз.
+	The PIN is incorrect.	PIN коды қате.
+	PKCS #11 device  ·  	PKCS #11 құрылғысы  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Қолтаңба жасау құрылғысын пайдалану (PKCS #11 модулі: смарт-карта, токен, mSzafir үшін CloudSigner)
+	Module (.dylib, .so, .dll)	Модуль (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) орнатылған болса, өзі табылады: қол қоюдан бұрын оны іске қосып, жүйеге кіріңіз.
+	PKCS #11 module	PKCS #11 модулі
+	PIN	PIN коды
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	«Қол қою» басылғаннан кейін mSzafir қолданбасындағы OTT кодын CloudSigner терезесіне енгізіп, қолтаңбаны қолданбада растаңыз. CloudSigner-де тұрақты OTT коды қосулы болса, код бірнеше минутта бір рет қана сұралады.
+	The key is on the device, which signs once it has its PIN.	Кілт құрылғыда; ол PIN кодын алғаннан кейін қол қояды.
+	The key is on the device, which may ask for its PIN itself.	Кілт құрылғыда; ол PIN кодын өзі сұрауы мүмкін.
 	Issued by: 	Шығарушы: 
 	, Expires: 	, Жарамдылық мерзімі: 
 	No digital IDs yet.	Әзірге цифрлық ID жоқ.

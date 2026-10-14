@@ -630,6 +630,14 @@ pub struct PdfCraftApp {
     pub sign_draft: Option<SignDraft>,
     /// Digital ID files the user has created or added.
     pub digital_ids: Vec<DigitalIdEntry>,
+    /// PKCS #11 modules the user attached (Configure New Digital ID ▸ signature creation
+    /// device), whose tokens' identities are listed with the digital IDs.
+    pub pkcs11_modules: Vec<String>,
+    /// The PKCS #11 token identities last listed (none in the browser).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) token_ids: sign_ui::TokenIds,
+    /// A signature being made on a token, waiting for the signer's approval.
+    pub(crate) sign_run: Option<sign_ui::SignRun>,
     /// Signatures panel: expanded entries (field names).
     pub sig_expanded: Vec<String>,
     /// Accessibility Checker: options, the last check, and rules skipped by hand.
@@ -951,6 +959,9 @@ impl PdfCraftApp {
             summary_sort: Default::default(),
             sign_draft: None,
             digital_ids: Vec::new(),
+            pkcs11_modules: Vec::new(),
+            token_ids: Default::default(),
+            sign_run: None,
             sig_expanded: Vec::new(),
             a11y_options: a11y_ui::A11yOptions::default(),
             ocr_draft: ocr_ui::OcrDraft::default(),
@@ -2096,7 +2107,7 @@ impl PdfCraftApp {
     /// Serialize the user's persistent state (recent files, theme). Local only.
     pub fn persist(&self) -> String {
         let trusted: Vec<String> = self.session.trusted_certificates().iter().map(pdfcraft_engine::sign::x509::to_pem).collect();
-        serde_json::json!({
+        let mut state = serde_json::json!({
             "docking": self.docking,
             "docking_left_open": self.left_open,
             "docking_right": self.right,
@@ -2144,8 +2155,8 @@ impl PdfCraftApp {
             "signature_image": match &self.signature { Some(s @ fill_sign::SavedSig::Image(_)) => Some(s), _ => None },
             "initials": self.initials,
             "sign_graphic": self.sign_graphic,
-            // macOS Keychain and Windows store identities are read from their OS key stores each time.
-            "digital_ids": self.digital_ids.iter().filter(|e| !e.path.starts_with("keychain:") && !e.path.starts_with("windows:")).collect::<Vec<_>>(),
+            // macOS Keychain, Windows store and PKCS #11 token identities are read from where they live each time.
+            "digital_ids": self.digital_ids.iter().filter(|e| !sign_ui::is_listed_each_time(&e.path)).collect::<Vec<_>>(),
             "trusted": trusted,
             "custom_stamps": stamps_ui::encode(&self.custom_stamps),
             "javascript": self.session.javascript(),
@@ -2155,8 +2166,10 @@ impl PdfCraftApp {
             "combine_zoom": self.combine_zoom,
             "comments_panel_closed": self.comments_panel_closed,
             "right_panel_closed": self.right_panel_closed,
-        })
-        .to_string()
+        });
+        // Outside the literal above, which is at serde_json's macro recursion limit.
+        state["pkcs11_modules"] = serde_json::json!(self.pkcs11_modules);
+        state.to_string()
     }
 
     /// Restore state written by `persist`. Unknown or malformed data is ignored.
@@ -2299,6 +2312,9 @@ impl PdfCraftApp {
         self.sign_graphic = serde_json::from_value(v["sign_graphic"].clone()).unwrap_or_default();
         if let Ok(ids) = serde_json::from_value::<Vec<DigitalIdEntry>>(v["digital_ids"].clone()) {
             self.digital_ids = ids;
+        }
+        if let Ok(modules) = serde_json::from_value::<Vec<String>>(v["pkcs11_modules"].clone()) {
+            self.pkcs11_modules = modules;
         }
         self.custom_stamps = stamps_ui::decode(&v["custom_stamps"]);
         self.custom_actions = actions_ui::decode(&v["actions"]);
@@ -2909,6 +2925,7 @@ impl eframe::App for PdfCraftApp {
         }
         self.poll_export();
         self.poll_ocr();
+        self.poll_signing();
         self.poll_optimize();
         self.poll_action();
         self.process_file_requests();

@@ -1967,6 +1967,22 @@
 	Width:	Širina:
 	Window Options	Možnosti okna
 	Windows store  ·  	Shramba Windows  ·  
+	the certificate expired on {date}	potrdilo je poteklo {date}
+	Choose the module's library file.	Izberite datoteko knjižnice modula.
+	{file}: there is no such file.	{file}: te datoteke ni.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Žetoni modula ne vsebujejo digitalne identitete, s katero bi PdfCraft lahko podpisal.
+	The device's digital ID isn't available any more; start signing again to list it.	Digitalna identiteta naprave ni več na voljo; za prikaz znova začnite podpisovanje.
+	Enter the device's PIN.	Vnesite PIN naprave.
+	The PIN is incorrect.	PIN ni pravilen.
+	PKCS #11 device  ·  	Naprava PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Uporabi napravo za ustvarjanje podpisa (modul PKCS #11: pametna kartica, žeton, CloudSigner za mSzafir)
+	Module (.dylib, .so, .dll)	Modul (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) se najde sam, če je nameščen: pred podpisovanjem ga zaženite in se prijavite.
+	PKCS #11 module	Modul PKCS #11
+	PIN	PIN
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	Po kliku Podpiši v okno CloudSignerja vnesite kodo OTT iz aplikacije mSzafir in podpis odobrite v aplikaciji. Z vklopljeno trajno kodo OTT v CloudSignerju se koda zahteva le enkrat na nekaj minut.
+	The key is on the device, which signs once it has its PIN.	Ključ je na napravi, ki podpiše, ko dobi PIN.
+	The key is on the device, which may ask for its PIN itself.	Ključ je na napravi, ki lahko sama zahteva PIN.
 	Write this email?	Napisati to e-pošto?
 	Wrong password	Napačno geslo
 	Wrote 1 file to {dir}	V {dir} je zapisana 1 datoteka

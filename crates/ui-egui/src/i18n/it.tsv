@@ -850,6 +850,22 @@
 	Choose the digital ID that you want to use for signing:	Scegli l'ID digitale da usare per firmare:
 	Keychain  ·  	Portachiavi  ·  
 	Windows store  ·  	Archivio Windows  ·  
+	the certificate expired on {date}	il certificato è scaduto il {date}
+	Choose the module's library file.	Scegli il file di libreria del modulo.
+	{file}: there is no such file.	{file}: questo file non esiste.
+	The module's tokens hold no digital ID PdfCraft can sign with.	I token del modulo non contengono alcun ID digitale con cui PdfCraft possa firmare.
+	The device's digital ID isn't available any more; start signing again to list it.	L'ID digitale del dispositivo non è più disponibile; ricomincia la firma per elencarlo.
+	Enter the device's PIN.	Inserisci il PIN del dispositivo.
+	The PIN is incorrect.	Il PIN non è corretto.
+	PKCS #11 device  ·  	Dispositivo PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Usa un dispositivo per la creazione della firma (modulo PKCS #11: smart card, token, CloudSigner per mSzafir)
+	Module (.dylib, .so, .dll)	Modulo (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) viene trovato da solo se è installato: avvialo ed esegui l'accesso prima di firmare.
+	PKCS #11 module	Modulo PKCS #11
+	PIN	PIN
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	Dopo Firma, inserisci il codice OTT dell'app mSzafir nella finestra di CloudSigner e approva la firma nell'app. Con il codice OTT persistente di CloudSigner attivo, il codice viene chiesto solo una volta ogni pochi minuti.
+	The key is on the device, which signs once it has its PIN.	La chiave è sul dispositivo, che firma una volta ricevuto il PIN.
+	The key is on the device, which may ask for its PIN itself.	La chiave è sul dispositivo, che può chiedere il PIN da sé.
 	Issued by: 	Rilasciato da: 
 	, Expires: 	, Scadenza: 
 	No digital IDs yet.	Ancora nessun ID digitale.

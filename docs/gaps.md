@@ -180,12 +180,13 @@ update the numbers.
 
 ### 10. Signatures: no PKCS #11, timestamp servers or online revocation
 
-- **Missing:** PKCS #11 tokens and smart cards on macOS and Linux; timestamp-server preferences;
+- **Missing:** PKCS #11 checked only on SoftHSM (tokens through a chosen module, CloudSigner for
+  mSzafir, one approval for a batch: `sign.pkcs11` partial); timestamp-server preferences;
   fetching OCSP/CRL online for LTV; FieldMDP and locking fields on signing; the OS trust store; EU
   Trusted Lists; signature graphics and saved appearances; compare signed version; signing in the
   browser.
-- **Evidence:** `sign.pkcs11`, `sign.timestamp-servers`, `sign.field-mdp`, `sign.os-trust`,
-  `sign.eutl` planned; `sign.pades-bt`, `sign.ltv`, `sign.ocsp-crl` partial (caller-supplied
+- **Evidence:** `sign.timestamp-servers`, `sign.field-mdp`, `sign.os-trust`, `sign.eutl` planned;
+  `sign.pkcs11` partial; `sign.pades-bt`, `sign.ltv`, `sign.ocsp-crl` partial (caller-supplied
   evidence). Users ask for Acrobat-like validation
   ([#824](https://github.com/storytold/pdfcraft/issues/824),
   [#775](https://github.com/storytold/pdfcraft/issues/775),

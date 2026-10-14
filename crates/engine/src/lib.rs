@@ -4423,6 +4423,38 @@ impl Session {
         Ok(Arc::new(pdfcraft_sign::sign_with_timestamp(&editor.cos, id, &opts, tsa)?))
     }
 
+    /// A document's signing that can run away from the session, on another thread: the
+    /// document as it is now, with the signing date filled in. For signatures that wait on the
+    /// signer (a PKCS #11 token's approval in a phone app) without holding up the app.
+    pub fn signing_job(&self, doc: DocId, mut opts: SignOptions) -> Result<SigningJob, EditError> {
+        let d = self.get(doc).ok_or(EditError::NoDocument)?;
+        let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
+        if opts.date.is_empty() {
+            opts.date = self.signing_date();
+        }
+        Ok(SigningJob { cos: editor.cos.clone(), opts })
+    }
+
+    /// [`Session::sign`] for several documents at once, each with its own digital ID: the
+    /// signatures are made at the same time (on native targets), as a PKCS #11 transaction needs
+    /// ([`pdfcraft_sign::pkcs11::Transaction`]: CloudSigner's one approval for the batch). The
+    /// results are in the order of `jobs`.
+    pub fn sign_together(&self, jobs: Vec<(DocId, pdfcraft_sign::DigitalId, SignOptions)>) -> Vec<Result<Arc<Vec<u8>>, EditError>> {
+        let prepared: Vec<_> = jobs.into_iter().map(|(doc, id, opts)| self.signing_job(doc, opts).map(|job| (job, id))).collect();
+        let sign = |prepared: Result<(SigningJob, pdfcraft_sign::DigitalId), EditError>| {
+            let (job, id) = prepared?;
+            // A document that fails lets the rest of its batch go on: its ID gives up when dropped.
+            job.sign(&id)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        return std::thread::scope(|s| {
+            let running: Vec<_> = prepared.into_iter().map(|job| s.spawn(move || sign(job))).collect();
+            running.into_iter().map(|t| t.join().unwrap_or_else(|_| Err(EditError::Sign("the signing thread failed".into())))).collect()
+        });
+        #[cfg(target_arch = "wasm32")]
+        prepared.into_iter().map(sign).collect()
+    }
+
     /// Append a standalone document timestamp (RFC 3161, `/ETSI.RFC3161`) covering the file's
     /// current state. An empty `date` takes the session clock; the transport is the caller's.
     pub fn timestamp_document(&self, doc: DocId, tsa: &dyn pdfcraft_sign::TimestampAuthority, date: String) -> Result<Arc<Vec<u8>>, EditError> {
@@ -4685,4 +4717,19 @@ pub fn filter_pages(info: &pdfcraft_render::DocInfo, pages: &[usize], parity: Pa
             }
         })
         .collect()
+}
+
+/// A document's signing taken out of the session ([`Session::signing_job`]), to run on any
+/// thread.
+#[derive(Clone)]
+pub struct SigningJob {
+    cos: pdfcraft_cos::Document,
+    opts: SignOptions,
+}
+
+impl SigningJob {
+    /// Sign the document as it was when the job was taken.
+    pub fn sign(&self, id: &pdfcraft_sign::DigitalId) -> Result<Arc<Vec<u8>>, EditError> {
+        Ok(Arc::new(pdfcraft_sign::sign(&self.cos, id, &self.opts)?))
+    }
 }

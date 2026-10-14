@@ -686,13 +686,13 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("sign.digital")
             .with(schema(json!({}), &[])),
-        t("sign_document", "Sign a document", "Sign with a digital ID (a .p12/.pfx path, or on macOS a Keychain identity: \"keychain:<common name or fingerprint>\" from sign_keychain_ids, or on Windows a store identity: \"windows:<common name or fingerprint>\" from sign_windows_ids) and save the signed file to `out` (signing always saves, as in Acrobat; the document then shows the signed file). Sign an existing empty signature field (`field`), or a new one on `page` at `rect` (omit rect for an invisible signature). certify: no_changes, form_fill or comments makes a certification signature. graphic shows a picture where the signer's name would be large (Acrobat: Configure Signature Appearance): {\"image\": path} (PNG or JPEG), {\"text\": name} (typed in the Fill & Sign script font) or {\"strokes\": [[[x, y], …], …]} (y up, the drawing pad 1 wide); it needs a visible signature. PAdES B-B, SHA-256 (SHA-384 for P-384 keys).")
+        t("sign_document", "Sign a document", "Sign with a digital ID (a .p12/.pfx path, or on macOS a Keychain identity: \"keychain:<common name or fingerprint>\" from sign_keychain_ids, or on Windows a store identity: \"windows:<common name or fingerprint>\" from sign_windows_ids, or a PKCS #11 token identity: \"pkcs11:<common name or fingerprint>\" from sign_pkcs11_ids, with its PIN as `password` when it needs one) and save the signed file to `out` (signing always saves, as in Acrobat; the document then shows the signed file). Sign an existing empty signature field (`field`), or a new one on `page` at `rect` (omit rect for an invisible signature). certify: no_changes, form_fill or comments makes a certification signature. graphic shows a picture where the signer's name would be large (Acrobat: Configure Signature Appearance): {\"image\": path} (PNG or JPEG), {\"text\": name} (typed in the Fill & Sign script font) or {\"strokes\": [[[x, y], …], …]} (y up, the drawing pad 1 wide); it needs a visible signature. PAdES B-B, SHA-256 (SHA-384 for P-384 keys).")
             .cmd("sign.digital")
             .with(schema(
                 json!({
                     "doc": doc(),
-                    "id": { "type": "string", "description": "Digital ID file (.p12 / .pfx), keychain: reference on macOS, or windows: reference on Windows." },
-                    "password": { "type": "string" },
+                    "id": { "type": "string", "description": "Digital ID file (.p12 / .pfx), keychain: reference on macOS, windows: reference on Windows, or pkcs11: reference." },
+                    "password": { "type": "string", "description": "The digital ID file's password, or the token's PIN." },
                     "field": { "type": "string" },
                     "page": { "type": "integer", "minimum": 1 },
                     "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
@@ -714,6 +714,41 @@ pub fn tools() -> Vec<ToolDef> {
                     "out": { "type": "string", "description": "Where to save the signed document." },
                 }),
                 &["doc", "id", "out"],
+            )),
+        t("sign_pkcs11_ids", "List PKCS #11 token digital IDs", "The signing identities on PKCS #11 tokens (smart cards, USB tokens, KIR's CloudSigner for mSzafir): certificate details, the token, whether it needs a PIN, and the pkcs11: reference sign_document and sign_documents take. Only the modules the user set up are loaded: those listed in the PDFCRAFT_PKCS11_MODULES environment variable (library paths, separated as in PATH) and CloudSigner where its installer puts it. `problems` says what couldn't be read (CloudSigner not running or not logged in, no token, an unsupported key).")
+            .ro()
+            .cmd("sign.digital")
+            .with(schema(json!({}), &[])),
+        t("sign_documents", "Sign several documents", "Sign several open documents with one digital ID (as sign_document takes it), each saved to its own `out`. With a PKCS #11 token identity the signatures of up to 20 documents are made at the same time, so KIR's CloudSigner asks for one OTT code and one approval in the mSzafir app for all of them (a transaction; more documents make one transaction per 20). A document that fails doesn't stop the others: each entry of the result has its `result` (as sign_document returns it) or its `error`.")
+            .cmd("sign.digital")
+            .with(schema(
+                json!({
+                    "id": { "type": "string", "description": "Digital ID file (.p12 / .pfx), keychain:, windows: or pkcs11: reference." },
+                    "password": { "type": "string", "description": "The digital ID file's password, or the token's PIN." },
+                    "documents": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1000,
+                        "description": "One entry per document, with sign_document's arguments except id and password.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "doc": doc(),
+                                "field": { "type": "string" },
+                                "page": { "type": "integer", "minimum": 1 },
+                                "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+                                "reason": { "type": "string" },
+                                "location": { "type": "string" },
+                                "contact": { "type": "string" },
+                                "certify": { "type": "string", "enum": ["no_changes", "form_fill", "comments"] },
+                                "graphic": { "type": "object", "description": "As sign_document's graphic." },
+                                "out": { "type": "string", "description": "Where to save the signed document." },
+                            },
+                            "required": ["doc", "out"],
+                        },
+                    },
+                }),
+                &["id", "documents"],
             )),
         t("sign_trust", "Trust certificates", "Add certificates (.cer/.crt/.pem/.der, or the certificates in a .p12 with `password`) to the trusted certificates used to validate signatures, or clear the list (clear: true). Every open document is revalidated. Returns the trusted list.").with(schema(
             json!({ "paths": { "type": "array", "items": { "type": "string" } }, "password": { "type": "string" }, "clear": { "type": "boolean" } }),

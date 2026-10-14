@@ -528,6 +528,22 @@
 	Choose the digital ID that you want to use for signing:	Изберете цифровия идентификатор, с който искате да подпишете:
 	Keychain  ·  	Keychain  ·  
 	Windows store  ·  	Хранилище на Windows  ·  
+	the certificate expired on {date}	сертификатът е изтекъл на {date}
+	Choose the module's library file.	Изберете файла с библиотеката на модула.
+	{file}: there is no such file.	{file}: няма такъв файл.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Токените на модула не съдържат цифров идентификатор, с който PdfCraft може да подписва.
+	The device's digital ID isn't available any more; start signing again to list it.	Цифровият идентификатор на устройството вече не е достъпен; започнете подписването отново, за да го покажете.
+	Enter the device's PIN.	Въведете PIN кода на устройството.
+	The PIN is incorrect.	PIN кодът е грешен.
+	PKCS #11 device  ·  	Устройство PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Използвай устройство за създаване на подпис (модул PKCS #11: смарт карта, токен, CloudSigner за mSzafir)
+	Module (.dylib, .so, .dll)	Модул (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) се открива автоматично, когато е инсталиран: стартирайте го и влезте в профила си преди подписване.
+	PKCS #11 module	Модул PKCS #11
+	PIN	PIN код
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	След „Подпиши“ въведете OTT кода от приложението mSzafir в прозореца на CloudSigner и одобрете подписа в приложението. Ако постоянният OTT код в CloudSigner е включен, кодът се иска само веднъж на няколко минути.
+	The key is on the device, which signs once it has its PIN.	Ключът е на устройството, което подписва след въвеждане на PIN кода.
+	The key is on the device, which may ask for its PIN itself.	Ключът е на устройството, което може само да поиска PIN кода си.
 	Issued by: 	Издаден от: 
 	, Expires: 	, валиден до: 
 	No digital IDs yet.	Все още няма цифрови идентификатори.

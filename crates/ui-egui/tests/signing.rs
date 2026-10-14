@@ -489,3 +489,225 @@ fn an_imported_digital_id_can_be_removed() {
     assert_eq!(h.state().sign_draft.as_ref().map(|d| d.step), Some(SignStep::Configure));
     h.get_by_label("Configure a Digital ID for Signing");
 }
+
+/// A PKCS #11 module and its token, end to end through the dialog on SoftHSM (a software
+/// token): Configure New Digital ID ▸ signature creation device, the PIN, signing on a worker
+/// while the app goes on, the module kept in the settings, and CloudSigner's approval hint.
+/// Skipped when SoftHSM isn't installed. SoftHSM reads its token folder from `SOFTHSM2_CONF`,
+/// so the checks run in a child process (this test binary again).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_pkcs11_device_signs_through_the_dialog() {
+    let Some(lib) = pkcs11_device::softhsm() else {
+        eprintln!("SoftHSM isn't installed: PKCS #11 signing in the dialog not checked");
+        return;
+    };
+    let dir = dir();
+    std::fs::create_dir_all(dir.join("tokens")).unwrap();
+    let conf = dir.join("softhsm2.conf");
+    std::fs::write(&conf, format!("directories.tokendir = {}\nobjectstore.backend = file\nlog.level = ERROR\n", dir.join("tokens").display()))
+        .unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "pkcs11_device::dialog_checks", "--ignored", "--nocapture", "--test-threads=1"])
+        .env("SOFTHSM2_CONF", &conf)
+        .env("PDFCRAFT_TEST_SOFTHSM_LIB", &lib)
+        .env("PDFCRAFT_TEST_WORKDIR", &dir)
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "the checks ran: {text}");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod pkcs11_device {
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
+    use cryptoki::mechanism::Mechanism;
+    use cryptoki::object::{Attribute, AttributeType, CertificateType, ObjectClass, ObjectHandle};
+    use cryptoki::session::{Session, UserType};
+    use cryptoki::types::AuthPin;
+    use pdfcraft_engine::sign::keys::{DigestAlg, ExternalKey};
+    use pdfcraft_engine::sign::{Certificate, Name, PrivateKey, PublicKey, SignError, Time, der};
+
+    use super::*;
+
+    const PIN: &str = "135790";
+
+    pub(super) fn softhsm() -> Option<PathBuf> {
+        if let Some(p) = std::env::var_os("PDFCRAFT_TEST_SOFTHSM") {
+            return Some(PathBuf::from(p));
+        }
+        [
+            "/usr/lib/softhsm/libsofthsm2.so",
+            "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so",
+            "/usr/lib/aarch64-linux-gnu/softhsm/libsofthsm2.so",
+            "/usr/local/lib/softhsm/libsofthsm2.so",
+            "/opt/homebrew/lib/softhsm/libsofthsm2.so",
+            "/usr/local/lib/softhsm/libsofthsm2.dylib",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.is_file())
+    }
+
+    /// Signs through a session the test holds (only to make the token's certificate).
+    struct SetupKey {
+        session: Mutex<Session>,
+        key: ObjectHandle,
+    }
+
+    impl ExternalKey for SetupKey {
+        fn sign(&self, alg: DigestAlg, msg: &[u8]) -> Result<Vec<u8>, SignError> {
+            let info = der::seq(&[&der::algorithm(alg.oid(), Some(&der::null())), &der::octets(&alg.digest(&[msg]))]);
+            self.session.lock().unwrap().sign(&Mechanism::RsaPkcs, self.key, &info).map_err(|e| SignError::Crypto(e.to_string()))
+        }
+    }
+
+    /// A token "UI test" holding one RSA identity, "Device Signer".
+    fn set_up_token(lib: &std::path::Path) {
+        let ctx = Pkcs11::new(lib).unwrap();
+        ctx.initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK)).unwrap();
+        let free = *ctx.get_slots_with_token().unwrap().first().unwrap();
+        let so = AuthPin::from("so-secret".to_string());
+        ctx.init_token(free, &so, "UI test").unwrap();
+        let slot =
+            ctx.get_slots_with_token().unwrap().into_iter().find(|s| ctx.get_token_info(*s).is_ok_and(|i| i.label().trim() == "UI test")).unwrap();
+        let session = ctx.open_rw_session(slot).unwrap();
+        session.login(UserType::So, Some(&so)).unwrap();
+        session.init_pin(&AuthPin::from(PIN.to_string())).unwrap();
+        session.logout().unwrap();
+        session.login(UserType::User, Some(&AuthPin::from(PIN.to_string()))).unwrap();
+        let keeper = ctx.open_rw_session(slot).unwrap();
+        let common = [Attribute::Token(true), Attribute::Id(vec![9])];
+        let mut public_t = common.to_vec();
+        public_t.extend([Attribute::Verify(true), Attribute::ModulusBits(2048.into()), Attribute::PublicExponent(vec![1, 0, 1])]);
+        let mut private_t = common.to_vec();
+        private_t.extend([Attribute::Private(true), Attribute::Sensitive(true), Attribute::Sign(true)]);
+        let (public, private) = session.generate_key_pair(&Mechanism::RsaPkcsKeyPairGen, &public_t, &private_t).unwrap();
+        let (mut n, mut e) = (Vec::new(), Vec::new());
+        for a in session.get_attributes(public, &[AttributeType::Modulus, AttributeType::PublicExponent]).unwrap() {
+            match a {
+                Attribute::Modulus(v) => n = v,
+                Attribute::PublicExponent(v) => e = v,
+                _ => {}
+            }
+        }
+        let key = PrivateKey::external(PublicKey::Rsa { n, e }, Arc::new(SetupKey { session: Mutex::new(session), key: private }));
+        let cert =
+            Certificate::self_signed(&Name::build("Device Signer", "", "PdfCraft tests", "", "PL"), &key, Time::from_unix(1_767_225_600), 5, &[9])
+                .unwrap();
+        drop(key);
+        keeper
+            .create_object(&[
+                Attribute::Class(ObjectClass::CERTIFICATE),
+                Attribute::CertificateType(CertificateType::X_509),
+                Attribute::Token(true),
+                Attribute::Id(vec![9]),
+                Attribute::Subject(cert.subject.raw.clone()),
+                Attribute::Value(cert.raw.clone()),
+            ])
+            .unwrap();
+        keeper.logout().unwrap();
+    }
+
+    fn signed(h: &Harness<'static, PdfCraftApp>) -> bool {
+        let s = h.state();
+        s.session.get(s.views[0].id).is_some_and(|d| d.signatures.iter().any(|x| x.signed))
+    }
+
+    #[test]
+    #[ignore = "run by a_pkcs11_device_signs_through_the_dialog with SoftHSM set up"]
+    fn dialog_checks() {
+        let (Some(lib), Some(work)) = (std::env::var_os("PDFCRAFT_TEST_SOFTHSM_LIB"), std::env::var_os("PDFCRAFT_TEST_WORKDIR")) else { return };
+        let (lib, work) = (PathBuf::from(lib), PathBuf::from(work));
+        set_up_token(&lib);
+        let lib_text = lib.to_string_lossy().into_owned();
+
+        // No digital IDs yet: Configure, with a signature creation device.
+        let mut h = harness(work.clone());
+        h.state_mut().start_signing(0, None, None, None);
+        h.run_steps(2);
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().step, SignStep::Configure);
+        h.get_by_label("Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)").click();
+        h.run_steps(2);
+        h.get_by_label("CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.");
+        h.state_mut().sign_draft.as_mut().unwrap().new_id.module = lib_text.clone();
+        h.run_steps(1);
+        h.get_by_label("Continue").click();
+        h.run_steps(3);
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().error, None);
+        assert_eq!(h.state().pkcs11_modules, std::slice::from_ref(&lib_text));
+        let entry = h.state().digital_ids.iter().find(|e| e.path.starts_with("pkcs11:")).cloned().expect("the token's identity is listed");
+        assert_eq!(entry.name, "Device Signer (UI test)");
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().step, SignStep::Choose);
+        // The picker's row, by the certificate's name and token.
+        h.get_by_label("Device Signer (UI test)");
+
+        // Sign as: a PIN, not a file password.
+        h.run_steps(2);
+        h.get_by_label("Continue").click();
+        h.run_steps(3);
+        h.get_by_label("Sign as \"Device Signer (UI test)\"");
+        assert_eq!(h.query_all_by_label("Digital ID password").count(), 0);
+        h.get_by_label("PIN");
+        h.get_by_label("The key is on the device, which signs once it has its PIN.");
+        h.get_by_label("Sign").click();
+        h.run_steps(3);
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().error.as_deref(), Some("Enter the device's PIN."));
+        h.state_mut().sign_draft.as_mut().unwrap().password = "000000".into();
+        h.get_by_label("Sign").click();
+        h.run_steps(3);
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().error.as_deref(), Some("The PIN is incorrect."));
+
+        // The right PIN: the token signs on a worker; the app saves the file when it's done.
+        h.state_mut().sign_draft.as_mut().unwrap().password = PIN.into();
+        h.get_by_label("Sign").click();
+        for _ in 0..400 {
+            h.run_steps(1);
+            if signed(&h) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(signed(&h), "the document was signed and shown");
+        assert!(work.join("contract_signed.pdf").is_file());
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let sig = doc.signatures.iter().find(|x| x.signed).unwrap();
+        assert_ne!(sig.status, SignatureStatus::Invalid, "{:?}", sig.details);
+        assert_eq!(sig.signer.as_deref(), Some("Device Signer"));
+
+        // The module is kept; the token's identities are listed afresh.
+        let settings: serde_json::Value = serde_json::from_str(&h.state().persist()).unwrap();
+        assert_eq!(settings["pkcs11_modules"], serde_json::json!([lib_text]));
+        assert!(settings["digital_ids"].as_array().unwrap().is_empty());
+        let mut restored = PdfCraftApp::new();
+        restored.restore(&h.state().persist());
+        assert_eq!(restored.pkcs11_modules, std::slice::from_ref(&lib_text));
+
+        // A module named as CloudSigner's says where the approval happens.
+        let cloudsigner = work.join("libCloudSignerP11.so");
+        std::os::unix::fs::symlink(&lib, &cloudsigner).unwrap();
+        let mut h = harness(work.join("cs"));
+        h.state_mut().pkcs11_modules = vec![cloudsigner.to_string_lossy().into_owned()];
+        h.state_mut().start_signing(0, None, None, None);
+        h.run_steps(3);
+        assert_eq!(h.state().sign_draft.as_ref().unwrap().step, SignStep::Choose);
+        h.get_by_label("Continue").click();
+        h.run_steps(3);
+        h.get_by_label_contains("enter the OTT code from the mSzafir app in CloudSigner's window");
+
+        // Remove detaches the module the user attached.
+        let mut h = harness(work.join("rm"));
+        h.state_mut().pkcs11_modules = vec![lib_text.clone()];
+        h.state_mut().start_signing(0, None, None, None);
+        h.run_steps(3);
+        let i = h.state().digital_ids.iter().position(|e| e.path.starts_with("pkcs11:")).unwrap();
+        assert!(h.state_mut().remove_digital_id(i));
+        assert!(h.state().pkcs11_modules.is_empty());
+        assert!(!h.state().digital_ids.iter().any(|e| e.path.starts_with("pkcs11")));
+    }
+}

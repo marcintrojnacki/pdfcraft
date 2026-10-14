@@ -2,7 +2,7 @@
 //! Certificates ▸ PKCS#11 Modules and Tokens): smart cards, USB tokens and remote signing services
 //! that ship a PKCS #11 module, such as KIR's CloudSigner for mSzafir qualified signatures. The
 //! private key stays on the token, which signs the digest PdfCraft gives it: `CKM_RSA_PKCS` over a
-//! DigestInfo (as KIR's own Szafir does with CloudSigner), or `CKM_ECDSA`.
+//! DigestInfo (what CloudSigner signs), or `CKM_ECDSA`.
 //!
 //! A module is a shared library loaded into PdfCraft's process, so only modules the user chose
 //! are loaded (the app's settings, `PDFCRAFT_PKCS11_MODULES` for the automation tools), plus
@@ -32,8 +32,8 @@ use crate::{Certificate, DigitalId, SignError, rsa_pad};
 /// Where KIR's CloudSigner installer puts its PKCS #11 module on macOS (mSzafir).
 pub const CLOUDSIGNER_MACOS: &str = "/Applications/CloudSigner.app/Contents/Frameworks/libCloudSignerP11.dylib";
 
-/// The most signatures one CloudSigner transaction carries (KIR's Szafir sends 20 at once too;
-/// the service's own limit isn't published).
+/// The most signatures one CloudSigner transaction carries: the mSzafir portal signs 1 to 20
+/// documents at once; the service's own limit isn't published.
 pub const MAX_PER_TRANSACTION: usize = 20;
 
 /// The PKCS #11 modules installed where their vendors put them: CloudSigner (mSzafir).
@@ -86,11 +86,24 @@ impl TokenIdentity {
 }
 
 /// A module's tokens' identities, and what couldn't be listed (a module that doesn't load, no
-/// token, a certificate PdfCraft can't sign with), as sentences.
+/// token, a certificate PdfCraft can't sign with).
 #[derive(Debug, Default)]
 pub struct Listing {
     pub ids: Vec<TokenIdentity>,
-    pub problems: Vec<String>,
+    pub problems: Vec<Problem>,
+}
+
+/// Something a module's listing ran into, as a sentence that says what to do when it can.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Problem {
+    pub module: PathBuf,
+    pub message: String,
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.module.display(), self.message)
+    }
 }
 
 /// The identities on the tokens of `modules`. A module that can't be read is a problem, not an
@@ -108,7 +121,7 @@ pub fn list(modules: &[PathBuf]) -> Listing {
                 }
                 out.problems.append(&mut l.problems);
             }
-            Err(e) => out.problems.push(e.to_string()),
+            Err(e) => out.problems.push(Problem { module: path.clone(), message: e.to_string() }),
         }
     }
     out
@@ -129,7 +142,7 @@ pub fn find(modules: &[PathBuf], reference_or_name: &str) -> Result<TokenIdentit
     }
     for p in listing.problems {
         message.push_str("; ");
-        message.push_str(&p);
+        message.push_str(&p.to_string());
     }
     Err(SignError::Crypto(message))
 }
@@ -156,13 +169,14 @@ fn list_module(path: &Path) -> Result<Listing, SignError> {
     let ctx = module(path)?;
     let slots = ctx.get_slots_with_token().map_err(|e| failed(e, path))?;
     let mut out = Listing::default();
+    let problem = |message: String| Problem { module: path.to_path_buf(), message };
     if slots.is_empty() {
         let hint = if is_cloudsigner(path) { " (is CloudSigner running, and are you logged in to it?)" } else { "" };
-        out.problems.push(format!("{}: no token is present{hint}", path.display()));
+        out.problems.push(problem(format!("no token is present{hint}")));
     }
     for slot in slots {
         if let Err(e) = list_slot(&ctx, path, slot, &mut out) {
-            out.problems.push(e.to_string());
+            out.problems.push(problem(e.to_string()));
         }
     }
     Ok(out)
@@ -191,7 +205,7 @@ fn list_slot(ctx: &Pkcs11, path: &Path, slot: Slot, out: &mut Listing) -> Result
         let Some(der) = der else { continue };
         match Certificate::parse(&der) {
             Ok(c) => certs.push((id, c)),
-            Err(e) => out.problems.push(format!("{token}: a certificate can't be read: {e}")),
+            Err(e) => out.problems.push(Problem { module: path.to_path_buf(), message: format!("{token}: a certificate can't be read: {e}") }),
         }
     }
     // Private keys are often hidden until the user logs in; then a certificate that may sign
@@ -211,7 +225,8 @@ fn list_slot(ctx: &Pkcs11, path: &Path, slot: Slot, out: &mut Listing) -> Result
     for (id, certificate) in mine {
         if certificate.public_key.store_signing_key().is_none() {
             let what = certificate.public_key.describe();
-            out.problems.push(format!("{}: its {what} key can't sign through PdfCraft yet (RSA, P-256 and P-384 only)", certificate.display_name()));
+            let message = format!("{}: its {what} key can't sign through PdfCraft yet (RSA, P-256 and P-384 only)", certificate.display_name());
+            out.problems.push(Problem { module: path.to_path_buf(), message });
             continue;
         }
         out.ids.push(TokenIdentity { certificate, chain: chain.clone(), token: token.clone(), module: path.to_path_buf(), needs_pin, slot, id });

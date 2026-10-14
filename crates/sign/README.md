@@ -48,8 +48,22 @@ for s in signatures(&doc, &bytes, &trust) {                                // li
   CertID hash matching, validity windows); validation checks embedded evidence against the
   signer's chain and a verified revocation invalidates the signature.
 
+- **PKCS #11 tokens** (`pkcs11`, native targets, on the `cryptoki` crate): smart cards, USB
+  tokens and remote signing services that ship a PKCS #11 module, such as KIR's CloudSigner
+  for mSzafir qualified signatures (found where its macOS installer puts it, `known_modules`).
+  Only modules the user chose are loaded: a module is code in the process. `list` reads the
+  certificates on each token (a key hidden until login is taken to be there for a certificate
+  that may sign and isn't a CA's); `TokenIdentity::open` logs in with the PIN when the token
+  sets `CKF_LOGIN_REQUIRED` without a protected authentication path (CloudSigner asks for its
+  OTT code in its own window, so it gets none), and the key signs `CKM_RSA_PKCS` over a
+  DigestInfo (what CloudSigner signs) or `CKM_ECDSA`; a key with
+  `CKA_ALWAYS_AUTHENTICATE` signs in parts with a context-specific login. A `Transaction` signs
+  a batch: each document in its own session, every `C_Sign` held back until all documents are
+  ready or have given up, so CloudSigner gathers up to 20 into one transaction (one window, one
+  OTT code, one approval in the mSzafir app). Tested end to end on SoftHSM.
+
 Not yet: revocation fetching (AIA/CRLDP extraction and a fetcher), timestamp-server
-configuration, FieldMDP locks, certificate security, direct PKCS #11 access to tokens.
+configuration, FieldMDP locks, certificate security.
 macOS Keychain and Windows Current User Personal (My) store identities sign through
 `ExternalKey` without exporting private keys. Windows CNG supports RSA PKCS #1 v1.5 and
 ECDSA P-256/P-384; the store integration is tested with software-backed keys. A smart card

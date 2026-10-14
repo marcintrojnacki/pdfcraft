@@ -72,6 +72,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Glyph-coverage test of the interface fonts; the same skrifa pdfcraft-fonts already uses.
 skrifa = "0.44"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Sets up a SoftHSM token for the PKCS #11 signing test.
+cryptoki = "0.12.1"
+
 [build-dependencies]
 serde_json = { workspace = true }
 toml = "1"

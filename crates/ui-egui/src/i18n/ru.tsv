@@ -847,6 +847,22 @@
 	Choose the digital ID that you want to use for signing:	Выберите цифровой идентификатор для подписи:
 	Keychain  ·  	Keychain  ·
 	Windows store  ·  	Хранилище Windows  ·
+	the certificate expired on {date}	срок действия сертификата истёк {date}
+	Choose the module's library file.	Выберите файл библиотеки модуля.
+	{file}: there is no such file.	{file}: такого файла нет.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Токены модуля не содержат цифрового идентификатора, которым PdfCraft может подписывать.
+	The device's digital ID isn't available any more; start signing again to list it.	Цифровой идентификатор устройства больше недоступен; начните подписание заново, чтобы увидеть его.
+	Enter the device's PIN.	Введите PIN-код устройства.
+	The PIN is incorrect.	Неверный PIN-код.
+	PKCS #11 device  ·  	Устройство PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Использовать средство создания подписи (модуль PKCS #11: смарт-карта, токен, CloudSigner для mSzafir)
+	Module (.dylib, .so, .dll)	Модуль (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) находится автоматически, если он установлен: перед подписанием запустите его и войдите в систему.
+	PKCS #11 module	Модуль PKCS #11
+	PIN	PIN-код
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	После нажатия «Подписать» введите OTT-код из приложения mSzafir в окне CloudSigner и подтвердите подпись в приложении. Если в CloudSigner включён постоянный OTT-код, код запрашивается лишь раз в несколько минут.
+	The key is on the device, which signs once it has its PIN.	Ключ находится на устройстве, которое подписывает после ввода PIN-кода.
+	The key is on the device, which may ask for its PIN itself.	Ключ находится на устройстве, которое может само запросить PIN-код.
 	Issued by: 	Выдан:
 	, Expires: 	, Истекает:
 	No digital IDs yet.	Нет цифровых идентификаторов.

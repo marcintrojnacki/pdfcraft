@@ -5889,7 +5889,7 @@ status = "shipped"
 commands = ["sign.digital", "sign.certify"]
 tools = ["sign_windows_ids", "sign_document"]
 evidence = ["crates/sign/tests/pdf.rs::signing_with_windows_store_identities", "crates/sign/tests/pdf.rs::a_windows_store_identity_signs_with_its_issuers", "crates/sign/tests/pdf.rs::windows_store_enumeration_and_missing_identity", "crates/automation/tests/automation.rs::digital_ids_signing_and_validation_through_tools", "crates/ui-egui/tests/signing.rs::windows_store_identity_does_not_ask_for_a_file_password", "crates/ui-egui/tests/signing.rs::an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen"]
-notes = "Current User Personal (My) CNG identities: RSA PKCS #1 v1.5 and DER-encoded ECDSA P-256/P-384. Keys never leave Windows; windows:<fingerprint|common name> for agents and Windows store labels in the desktop ID picker. The signature embeds the issuers Windows chains the certificate to. Store certificates that can't sign (no private key, another key type, a key CNG can't open) are reported with the reason and Windows error code (greyed in the picker, `unusable` in sign_windows_ids) rather than left out; keys that need a prompt to open are listed and prompt at signing. Tested with throwaway software-backed RSA-2048, P-256 and P-384 certificates and a key-less certificate (run with --ignored). Smart cards and tokens whose driver registers a CNG key storage provider sign with the provider's own PIN dialog (checked by hand with a SafeNet token only; no hardware in CI); still missing: the Local Machine store, legacy CryptoAPI-only providers, P-521/Brainpool/Ed25519 keys, direct PKCS #11."
+notes = "Current User Personal (My) CNG identities: RSA PKCS #1 v1.5 and DER-encoded ECDSA P-256/P-384. Keys never leave Windows; windows:<fingerprint|common name> for agents and Windows store labels in the desktop ID picker. The signature embeds the issuers Windows chains the certificate to. Store certificates that can't sign (no private key, another key type, a key CNG can't open) are reported with the reason and Windows error code (greyed in the picker, `unusable` in sign_windows_ids) rather than left out; keys that need a prompt to open are listed and prompt at signing. Tested with throwaway software-backed RSA-2048, P-256 and P-384 certificates and a key-less certificate (run with --ignored). Smart cards and tokens whose driver registers a CNG key storage provider sign with the provider's own PIN dialog (checked by hand with a SafeNet token only; no hardware in CI); still missing: the Local Machine store, legacy CryptoAPI-only providers, P-521/Brainpool/Ed25519 keys (PKCS #11 tokens: sign.pkcs11)."
 
 [[feature]]
 id = "sign.encrypted-documents"
@@ -5909,11 +5909,11 @@ title = "Sign with PKCS#11 tokens and smart cards"
 area = "H"
 tier = "P1"
 milestone = "M9"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["sign.digital", "sign.certify"]
+tools = ["sign_pkcs11_ids", "sign_document", "sign_documents"]
+evidence = ["crates/sign/tests/pkcs11.rs::signs_with_a_softhsm_token", "crates/automation/tests/pkcs11.rs::signing_tools_with_a_softhsm_token", "crates/ui-egui/tests/signing.rs::a_pkcs11_device_signs_through_the_dialog"]
+notes = "Configure New Digital ID ▸ Use a signature creation device attaches a PKCS #11 module (kept in the settings; Remove detaches it); its tokens' identities are listed with the digital IDs as PKCS #11 devices, an expired certificate and a module without identities greyed with why. KIR's CloudSigner (mSzafir) is found where its macOS installer puts it. PIN asked for only when the token sets CKF_LOGIN_REQUIRED without a protected path (CloudSigner takes its OTT code in its own window); CKA_ALWAYS_AUTHENTICATE keys sign in parts with a context-specific login. RSA (CKM_RSA_PKCS over a DigestInfo) and ECDSA P-256/P-384. A token signs on a worker so the app goes on while the signer approves on a phone. sign_documents signs up to 20 documents in one transaction (each C_Sign in its own session, released together) so CloudSigner asks for one approval. Tested end to end on SoftHSM only: still missing a check with CloudSigner and a real card, CloudSigner's Windows module location, token insertion events, a batch signing command in the desktop app, P-521/Brainpool keys."
 
 [[feature]]
 id = "sign.self-signed-id"

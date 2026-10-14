@@ -851,6 +851,22 @@
 	Choose the digital ID that you want to use for signing:	Виберіть цифрове посвідчення для підписування:
 	Keychain  ·  	В’язка ключів  ·  
 	Windows store  ·  	Сховище Windows  ·  
+	the certificate expired on {date}	термін дії сертифіката минув {date}
+	Choose the module's library file.	Виберіть файл бібліотеки модуля.
+	{file}: there is no such file.	{file}: такого файлу немає.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Токени модуля не містять цифрового посвідчення, яким PdfCraft може підписувати.
+	The device's digital ID isn't available any more; start signing again to list it.	Цифрове посвідчення пристрою більше недоступне; почніть підписування знову, щоб побачити його.
+	Enter the device's PIN.	Введіть PIN-код пристрою.
+	The PIN is incorrect.	Неправильний PIN-код.
+	PKCS #11 device  ·  	Пристрій PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Використати засіб створення підпису (модуль PKCS #11: смарт-картка, токен, CloudSigner для mSzafir)
+	Module (.dylib, .so, .dll)	Модуль (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	CloudSigner (mSzafir) знаходиться автоматично, якщо його встановлено: перед підписуванням запустіть його й увійдіть.
+	PKCS #11 module	Модуль PKCS #11
+	PIN	PIN-код
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	Після «Підписати» введіть OTT-код із застосунку mSzafir у вікні CloudSigner і підтвердіть підпис у застосунку. Якщо в CloudSigner увімкнено постійний OTT-код, код запитується лише раз на кілька хвилин.
+	The key is on the device, which signs once it has its PIN.	Ключ на пристрої, який підписує після введення PIN-коду.
+	The key is on the device, which may ask for its PIN itself.	Ключ на пристрої, який може сам запитати PIN-код.
 	Issued by: 	Видавець: 
 	, Expires: 	, Дійсний до: 
 	No digital IDs yet.	Ще немає цифрових посвідчень.

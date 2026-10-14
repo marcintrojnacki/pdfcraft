@@ -3,10 +3,11 @@
 //! Sign as dialogs, the Signatures panel, and the signature message bar.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use egui::{Align, Color32, CornerRadius, Layout, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::sign::{self, Appearance, Certificate, DigitalId, Modification, Name, PrivateKey};
-use pdfcraft_engine::{SignOptions, SignatureImage, SignatureInfo, SignatureStatus};
+use pdfcraft_engine::{DocId, SignOptions, SignatureImage, SignatureInfo, SignatureStatus};
 
 use crate::canvas::{DocView, PageXform};
 use crate::fill_sign::SavedSig;
@@ -57,6 +58,10 @@ pub struct NewIdDraft {
     /// Use a Digital ID from a file: its path and password.
     pub file: String,
     pub file_password: String,
+    /// Use a signature creation device (a PKCS #11 module) instead; `create` is then ignored.
+    pub device: bool,
+    /// The device's PKCS #11 module (shared library).
+    pub module: String,
 }
 
 impl Default for NewIdDraft {
@@ -73,7 +78,61 @@ impl Default for NewIdDraft {
             confirm: String::new(),
             file: String::new(),
             file_password: String::new(),
+            device: false,
+            module: String::new(),
         }
+    }
+}
+
+/// Whether a digital ID lives in an OS key store or on a PKCS #11 token, and so is listed afresh
+/// each time rather than kept in the settings.
+pub fn is_listed_each_time(path: &str) -> bool {
+    path.starts_with("keychain:") || path.starts_with("windows:") || path.starts_with("pkcs11")
+}
+
+/// The PKCS #11 token identities last listed, behind their `pkcs11:` references.
+#[derive(Clone, Debug, Default)]
+pub struct TokenIds {
+    #[cfg(not(target_arch = "wasm32"))]
+    ids: Vec<sign::pkcs11::TokenIdentity>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TokenIds {
+    fn get(&self, reference: &str) -> Option<&sign::pkcs11::TokenIdentity> {
+        self.ids.iter().find(|i| sign::pkcs11::reference(&i.certificate) == reference)
+    }
+}
+
+/// Where a token's worker leaves the signed document (or why it isn't signed).
+type SignResult = Arc<Mutex<Option<Result<Arc<Vec<u8>>, String>>>>;
+
+/// A signature being made on a token while the app goes on (CloudSigner waits for the signer's
+/// approval in the mSzafir app): the signed file is saved when the worker hands it over.
+pub struct SignRun {
+    doc: DocId,
+    path: PathBuf,
+    /// The document's edit generation when it was signed: a later edit isn't in the signature.
+    generation: u64,
+    choice: SignGraphic,
+    result: SignResult,
+}
+
+/// A greyed list entry for a PKCS #11 module that gave no digital IDs, saying why.
+#[cfg(not(target_arch = "wasm32"))]
+fn module_entry(problem: &sign::pkcs11::Problem) -> DigitalIdEntry {
+    let name = if sign::pkcs11::is_cloudsigner(&problem.module) {
+        "CloudSigner (mSzafir)".to_string()
+    } else {
+        problem.module.file_name().map_or_else(|| problem.module.display().to_string(), |n| n.to_string_lossy().into_owned())
+    };
+    DigitalIdEntry {
+        path: format!("pkcs11-module:{}", problem.module.display()),
+        name,
+        issuer: String::new(),
+        email: String::new(),
+        expires: String::new(),
+        unusable: Some(problem.message.clone()),
     }
 }
 
@@ -268,6 +327,10 @@ fn entry_unusable(u: &sign::windows::Unusable) -> DigitalIdEntry {
 impl PdfCraftApp {
     /// Start signing: the rectangle (or field) is known; show Sign with a Digital ID.
     pub fn start_signing(&mut self, page: usize, rect: Option<[f64; 4]>, field: Option<String>, certify: Option<u8>) {
+        if self.sign_run.is_some() {
+            self.notify_tr("A signature is still waiting for its approval.");
+            return;
+        }
         self.refresh_os_key_store_ids();
         let mut draft = SignDraft::new(page, rect, field, certify, &self.digital_ids);
         draft.graphic = match &self.sign_graphic {
@@ -283,7 +346,9 @@ impl PdfCraftApp {
 
     /// List OS key store signing identities (after the file-based IDs).
     fn refresh_os_key_store_ids(&mut self) {
-        self.digital_ids.retain(|e| !e.path.starts_with("keychain:") && !e.path.starts_with("windows:"));
+        self.digital_ids.retain(|e| !is_listed_each_time(&e.path));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.refresh_token_ids();
         #[cfg(target_os = "macos")]
         if self.os_key_store_ids {
             match sign::keychain::identities(None) {
@@ -318,6 +383,136 @@ impl PdfCraftApp {
         }
     }
 
+    /// List the identities on the tokens of the attached PKCS #11 modules and, in the desktop
+    /// app, of CloudSigner where its installer puts it. An expired certificate is shown greyed,
+    /// and so is a module that gave no identities, with why (CloudSigner not running…).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn refresh_token_ids(&mut self) {
+        let mut modules: Vec<PathBuf> = self.pkcs11_modules.iter().map(PathBuf::from).collect();
+        if self.os_key_store_ids {
+            for m in sign::pkcs11::known_modules() {
+                if !modules.contains(&m) {
+                    modules.push(m);
+                }
+            }
+        }
+        if modules.is_empty() {
+            self.token_ids = TokenIds::default();
+            return;
+        }
+        let listing = sign::pkcs11::list(&modules);
+        let now = sign::Time::from_unix(self.session.now_secs());
+        for id in &listing.ids {
+            let mut entry = entry_for(&sign::pkcs11::reference(&id.certificate), &id.certificate);
+            entry.name = id.display_name();
+            if id.certificate.not_after < now {
+                entry.unusable = Some(crate::i18n::fmt(tl!("the certificate expired on {date}"), &[("date", &entry.expires)]));
+            }
+            self.digital_ids.push(entry);
+        }
+        for m in &modules {
+            if listing.ids.iter().any(|i| &i.module == m) {
+                continue;
+            }
+            if let Some(p) = listing.problems.iter().find(|p| &p.module == m) {
+                self.digital_ids.push(module_entry(p));
+            }
+        }
+        self.token_ids = TokenIds { ids: listing.ids };
+    }
+
+    /// The PKCS #11 module a token entry (`pkcs11:` or `pkcs11-module:`) came from.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn entry_module(&self, path: &str) -> Option<PathBuf> {
+        if let Some(m) = path.strip_prefix("pkcs11-module:") {
+            return Some(PathBuf::from(m));
+        }
+        self.token_ids.get(path).map(|i| i.module.clone())
+    }
+
+    /// Whether Remove applies to the list entry: a digital ID file, or a token's identity (or
+    /// greyed module) from a module the user attached, which Remove detaches.
+    fn removable(&self, entry: &DigitalIdEntry) -> bool {
+        if entry.path.starts_with("keychain:") || entry.path.starts_with("windows:") {
+            return false;
+        }
+        if entry.path.starts_with("pkcs11") {
+            #[cfg(not(target_arch = "wasm32"))]
+            return self.entry_module(&entry.path).is_some_and(|m| self.pkcs11_modules.iter().any(|a| std::path::Path::new(a) == m));
+            #[cfg(target_arch = "wasm32")]
+            return false;
+        }
+        true
+    }
+
+    /// Configure New Digital ID ▸ Use a signature creation device: attach the PKCS #11 module and
+    /// list its tokens' identities. Returns the list index of its first one.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_module(&mut self) -> Result<usize, String> {
+        let module = self.sign_draft.as_ref().map(|d| d.new_id.module.trim().to_string()).unwrap_or_default();
+        if module.is_empty() {
+            return Err(tl!("Choose the module's library file.").to_string());
+        }
+        let path = PathBuf::from(&module);
+        if !path.is_file() {
+            return Err(crate::i18n::fmt(tl!("{file}: there is no such file."), &[("file", &module)]));
+        }
+        let listing = sign::pkcs11::list(std::slice::from_ref(&path));
+        let Some(first) = listing.ids.first() else {
+            let why = listing.problems.iter().map(|p| p.message.clone()).collect::<Vec<_>>().join("; ");
+            return Err(if why.is_empty() { tl!("The module's tokens hold no digital ID PdfCraft can sign with.").to_string() } else { why });
+        };
+        let reference = sign::pkcs11::reference(&first.certificate);
+        if !self.pkcs11_modules.contains(&module) {
+            self.pkcs11_modules.push(module);
+        }
+        self.refresh_os_key_store_ids();
+        self.digital_ids
+            .iter()
+            .position(|e| e.path == reference)
+            .ok_or_else(|| tl!("The module's tokens hold no digital ID PdfCraft can sign with.").to_string())
+    }
+
+    /// Open a token identity for signing, with `pin` when the token wants one.
+    fn token_id(&self, reference: &str, pin: &str) -> Result<DigitalId, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let identity =
+                self.token_ids.get(reference).ok_or(tl!("The device's digital ID isn't available any more; start signing again to list it."))?;
+            if identity.needs_pin && pin.is_empty() {
+                return Err(tl!("Enter the device's PIN.").to_string());
+            }
+            identity.open(Some(pin)).map_err(|e| match e {
+                sign::SignError::WrongPassword => tl!("The PIN is incorrect.").to_string(),
+                e => e.to_string(),
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = pin;
+            Err(format!("{reference}: PKCS #11 devices aren't available in the browser"))
+        }
+    }
+
+    /// For a token entry: whether the token wants its PIN, and whether it is CloudSigner.
+    fn token_needs(&self, path: &str) -> Option<(bool, bool)> {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.token_ids.get(path).map(|i| (i.needs_pin, sign::pkcs11::is_cloudsigner(&i.module)));
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            None
+        }
+    }
+
+    /// Configure New Digital ID ▸ Use a signature creation device.
+    fn configure_device(&mut self) -> Result<usize, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.attach_module();
+        #[cfg(target_arch = "wasm32")]
+        Err("PKCS #11 devices aren't available in the browser.".to_string())
+    }
+
     /// Add a digital ID file to the list (or select it if it's there).
     pub fn add_digital_id(&mut self, path: &str, cert: &Certificate) -> usize {
         if let Some(i) = self.digital_ids.iter().position(|e| e.path == path) {
@@ -332,8 +527,25 @@ impl PdfCraftApp {
     /// disk. Keychain and Windows store IDs belong to the OS and are listed again on every
     /// signing, so they can't be removed here. The open dialog's selection follows the list.
     pub fn remove_digital_id(&mut self, index: usize) -> bool {
-        if self.digital_ids.get(index).is_none_or(|e| e.path.starts_with("keychain:") || e.path.starts_with("windows:")) {
+        let Some(entry) = self.digital_ids.get(index).cloned() else { return false };
+        if !self.removable(&entry) {
             return false;
+        }
+        // A token's identity: detach its module, and list again without it.
+        #[cfg(not(target_arch = "wasm32"))]
+        if entry.path.starts_with("pkcs11") {
+            if let Some(m) = self.entry_module(&entry.path) {
+                self.pkcs11_modules.retain(|a| std::path::Path::new(a) != m);
+            }
+            self.refresh_os_key_store_ids();
+            if let Some(d) = self.sign_draft.as_mut() {
+                d.confirm_remove = None;
+                d.selected = self.digital_ids.iter().position(|e| e.unusable.is_none());
+                if self.digital_ids.is_empty() {
+                    d.step = SignStep::Configure;
+                }
+            }
+            return true;
         }
         self.digital_ids.remove(index);
         if let Some(d) = self.sign_draft.as_mut() {
@@ -408,10 +620,13 @@ impl PdfCraftApp {
         let Some((_, doc_id)) = self.active_ids() else { return Err("no document".into()) };
         let d = self.sign_draft.clone().ok_or("nothing to sign")?;
         let entry = d.selected.and_then(|i| self.digital_ids.get(i)).filter(|e| e.unusable.is_none()).cloned().ok_or("Choose a digital ID.")?;
+        let on_token = entry.path.starts_with("pkcs11:");
         let id = if entry.path.starts_with("keychain:") {
             keychain_id(&entry.path)?
         } else if entry.path.starts_with("windows:") {
             windows_id(&entry.path)?
+        } else if on_token {
+            self.token_id(&entry.path, &d.password)?
         } else {
             let bytes = std::fs::read(&entry.path).map_err(|e| format!("{}: {e}", entry.path))?;
             sign::pkcs12::open(&bytes, &d.password).map_err(|e| match e {
@@ -447,19 +662,31 @@ impl PdfCraftApp {
             if !app.commit_typing_in(doc_id) {
                 return Err(String::new());
             }
-            let signed = app.session.sign(doc_id, &id, opts).map_err(|e| e.to_string())?;
-            crate::editing::write_atomically(&path.to_string_lossy(), signed.as_slice()).map_err(|e| format!("Could not save: {e}"))?;
-            // Our own write is not a change on disk to reload (#431).
+            // A token may wait for its signer (CloudSigner: the approval in the mSzafir app, up
+            // to two minutes): it signs on a worker while the app goes on.
             #[cfg(not(target_arch = "wasm32"))]
-            app.watch.known_now(doc_id, &path.to_string_lossy());
-            app.session.mark_signed(doc_id, signed, Some(path.to_string_lossy().into_owned())).map_err(|e| e.to_string())?;
-            app.sign_graphic = choice;
-            if let Some(view) = app.views.iter_mut().find(|v| v.id == doc_id) {
-                view.invalidate_content();
+            if on_token && !app.run_inline {
+                let job = app.session.signing_job(doc_id, opts).map_err(|e| e.to_string())?;
+                let generation = app.session.get(doc_id).map_or(0, |d| d.edit_generation());
+                let result = Arc::new(Mutex::new(None));
+                let (slot, ctx) = (Arc::clone(&result), app.ctx.clone());
+                std::thread::spawn(move || {
+                    // Whatever happens here, the app hears of it: a lost answer would leave it
+                    // waiting for good.
+                    let signed = pdfcraft_engine::guard(|| job.sign(&id).map_err(|e| e.to_string())).unwrap_or_else(Err);
+                    // The token's session ends before the app hears of the result.
+                    drop(id);
+                    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(signed);
+                    if let Some(ctx) = ctx {
+                        ctx.request_repaint();
+                    }
+                });
+                app.sign_run = Some(SignRun { doc: doc_id, path, generation, choice, result });
+                app.notify_tr("Approve the signature on the device (for mSzafir: in CloudSigner's window and the mSzafir app)…");
+                return Ok(());
             }
-            app.right = Some(crate::RightPanel::Signatures);
-            app.notify_fmt("Signed and saved to {path}", &[("path", &path.display().to_string())]);
-            Ok(())
+            let signed = app.session.sign(doc_id, &id, opts).map_err(|e| e.to_string())?;
+            app.save_signed(doc_id, &path, signed, choice)
         };
         match self.save_override.clone() {
             Some(p) => sign_and_save(self, PathBuf::from(p)),
@@ -484,6 +711,57 @@ impl PdfCraftApp {
                 let _ = (stem, sign_and_save);
                 Err(String::new())
             }
+        }
+    }
+
+    /// Save the signed document to `path` and show it, with the Signatures panel open.
+    fn save_signed(&mut self, doc_id: DocId, path: &std::path::Path, signed: Arc<Vec<u8>>, choice: SignGraphic) -> Result<(), String> {
+        crate::editing::write_atomically(&path.to_string_lossy(), signed.as_slice()).map_err(|e| format!("Could not save: {e}"))?;
+        // Our own write is not a change on disk to reload (#431).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.watch.known_now(doc_id, &path.to_string_lossy());
+        self.session.mark_signed(doc_id, signed, Some(path.to_string_lossy().into_owned())).map_err(|e| e.to_string())?;
+        self.sign_graphic = choice;
+        if let Some(view) = self.views.iter_mut().find(|v| v.id == doc_id) {
+            view.invalidate_content();
+        }
+        self.right = Some(crate::RightPanel::Signatures);
+        self.notify_fmt("Signed and saved to {path}", &[("path", &path.display().to_string())]);
+        Ok(())
+    }
+
+    /// A token's signature has come back: save it (every frame; nothing to do until then).
+    pub(crate) fn poll_signing(&mut self) {
+        let done = self.sign_run.as_ref().and_then(|r| r.result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take());
+        let Some(result) = done else { return };
+        let Some(run) = self.sign_run.take() else { return };
+        // CloudSigner's window stays in front of the app: bring the app back.
+        if let Some(ctx) = &self.ctx {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        let signed = match result {
+            Ok(s) => s,
+            Err(e) => {
+                self.notify_fmt("The document wasn't signed: {e}", &[("e", &e)]);
+                return;
+            }
+        };
+        let path = run.path.display().to_string();
+        if self.session.get(run.doc).map(|d| d.edit_generation()) != Some(run.generation) {
+            // Edited (or closed) meanwhile: the signed file is saved, the document keeps its edits.
+            match crate::editing::write_atomically(&run.path.to_string_lossy(), signed.as_slice()) {
+                Ok(()) => self.notify_fmt(
+                    "Signed and saved to {path}. The document changed while the signature was being approved; those changes aren't in the signed file.",
+                    &[("path", &path)],
+                ),
+                Err(e) => self.notify_fmt("Could not save: {e}", &[("e", &e.to_string())]),
+            }
+            return;
+        }
+        if let Err(e) = self.save_signed(run.doc, &run.path, signed, run.choice)
+            && !e.is_empty()
+        {
+            self.notify(e);
         }
     }
 
@@ -590,6 +868,7 @@ fn choose(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
     ui.label(tl!("Choose the digital ID that you want to use for signing:"));
     ui.add_space(6.0);
     let ids = app.digital_ids.clone();
+    let can_remove: Vec<bool> = ids.iter().map(|e| app.removable(e)).collect();
     let Some(d) = app.sign_draft.as_mut() else { return true };
     let mut close = false;
     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
@@ -621,6 +900,8 @@ fn choose(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
                 tl!("Keychain  ·  ").to_string()
             } else if e.path.starts_with("windows:") {
                 tl!("Windows store  ·  ").to_string()
+            } else if e.path.starts_with("pkcs11") {
+                tl!("PKCS #11 device  ·  ").to_string()
             } else {
                 String::new()
             };
@@ -670,7 +951,7 @@ fn choose(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
         });
         ui.add_space(10.0);
     }
-    let removable = d.selected.filter(|&i| ids.get(i).is_some_and(|e| !e.path.starts_with("keychain:") && !e.path.starts_with("windows:")));
+    let removable = d.selected.filter(|&i| can_remove.get(i).copied().unwrap_or(false));
     ui.horizontal(|ui| {
         if widgets::pill_button(ui, tl!("Configure New Digital ID"), false).clicked() {
             d.step = SignStep::Configure;
@@ -703,11 +984,42 @@ fn configure(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
     // Browse… is desktop-only.
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut browse = false;
-    widgets::radio_value(ui, &mut d.new_id.create, false, tl!("Use a Digital ID from a file"));
-    widgets::radio_value(ui, &mut d.new_id.create, true, tl!("Create a new Digital ID (self-signed, saved to a password-protected file)"));
+    // Browse… for a device's module (desktop only).
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut browse_module = false;
+    let mut source = if d.new_id.device {
+        2u8
+    } else if d.new_id.create {
+        1
+    } else {
+        0
+    };
+    widgets::radio_value(ui, &mut source, 0, tl!("Use a Digital ID from a file"));
+    widgets::radio_value(ui, &mut source, 1, tl!("Create a new Digital ID (self-signed, saved to a password-protected file)"));
+    #[cfg(not(target_arch = "wasm32"))]
+    widgets::radio_value(ui, &mut source, 2, tl!("Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)"));
+    d.new_id.create = source == 1;
+    d.new_id.device = source == 2;
     ui.add_space(8.0);
     let n = &mut d.new_id;
-    if n.create {
+    if n.device {
+        egui::Grid::new("id-device").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            let l = ui.label(tl!("Module (.dylib, .so, .dll)"));
+            ui.horizontal(|ui| {
+                ui.add(crate::widgets::line(&mut n.module).desired_width(260.0)).labelled_by(l.id);
+                #[cfg(not(target_arch = "wasm32"))]
+                if ui.button(tl!("Browse…")).clicked() {
+                    browse_module = true;
+                }
+            });
+            ui.end_row();
+        });
+        ui.label(
+            egui::RichText::new(tl!("CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing."))
+                .small()
+                .color(t.text_muted),
+        );
+    } else if n.create {
         egui::Grid::new("new-id").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             for (label, value) in [
                 (tl!("Name"), &mut n.name),
@@ -774,8 +1086,14 @@ fn configure(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
         });
     });
     if go {
-        let create = app.sign_draft.as_ref().is_some_and(|d| d.new_id.create);
-        let result = if create { app.create_digital_id() } else { app.import_digital_id() };
+        let (create, device) = app.sign_draft.as_ref().map_or((false, false), |d| (d.new_id.create, d.new_id.device));
+        let result = if device {
+            app.configure_device()
+        } else if create {
+            app.create_digital_id()
+        } else {
+            app.import_digital_id()
+        };
         let Some(d) = app.sign_draft.as_mut() else { return true };
         match result {
             Ok(i) => {
@@ -801,8 +1119,20 @@ fn configure(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
             }
         });
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if browse_module {
+        let dialog = rfd::AsyncFileDialog::new().add_filter(tl!("PKCS #11 module"), &["dylib", "so", "dll"]);
+        let epoch = app.dialog_epoch();
+        app.ask_one(crate::pickers::Ask::File(dialog), None, move |app, p| {
+            if app.dialog_epoch() == epoch
+                && let Some(d) = app.sign_draft.as_mut()
+            {
+                d.new_id.module = p.to_string_lossy().into_owned();
+            }
+        });
+    }
     #[cfg(target_arch = "wasm32")]
-    let _ = browse;
+    let _ = (browse, browse_module);
     close
 }
 
@@ -859,6 +1189,8 @@ fn preview(
 
 fn sign_as(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
     let ids = app.digital_ids.clone();
+    // A token's identity: (it wants its PIN, it is CloudSigner).
+    let token = app.sign_draft.as_ref().and_then(|d| d.selected).and_then(|i| ids.get(i)).and_then(|e| app.token_needs(&e.path));
     let Some(d) = app.sign_draft.as_mut() else { return true };
     let Some(entry) = d.selected.and_then(|i| ids.get(i)).cloned() else {
         d.step = SignStep::Choose;
@@ -944,6 +1276,27 @@ fn sign_as(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> bool {
                     tl!("The key is in the Windows certificate store, which may ask to allow PdfCraft to use it.")
                 } else {
                     tl!("The key is in the macOS Keychain, which may ask to allow PdfCraft to use it.")
+                })
+                .small()
+                .color(t.text_muted),
+            );
+        } else if let Some((needs_pin, cloudsigner)) = token {
+            if needs_pin {
+                let l = ui.label(tl!("PIN"));
+                let r = ui.add(crate::widgets::line(&mut d.password).password(true).desired_width(160.0)).labelled_by(l.id);
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    go = true;
+                }
+                ui.end_row();
+            }
+            ui.label("");
+            ui.label(
+                egui::RichText::new(if cloudsigner {
+                    tl!("After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.")
+                } else if needs_pin {
+                    tl!("The key is on the device, which signs once it has its PIN.")
+                } else {
+                    tl!("The key is on the device, which may ask for its PIN itself.")
                 })
                 .small()
                 .color(t.text_muted),

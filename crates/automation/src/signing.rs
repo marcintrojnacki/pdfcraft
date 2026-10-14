@@ -2,14 +2,50 @@
 //! document, and manage trusted certificates. Rectangles are points from the top-left of the
 //! displayed page.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use pdfcraft_engine::sign::{self, Certificate, DigitalId, Modification, Name, PrivateKey};
-use pdfcraft_engine::{SignOptions, SignatureInfo, SignatureStatus};
+use pdfcraft_engine::{DocId, SignOptions, SignatureInfo, SignatureStatus};
 use serde_json::{Value, json};
 
 use crate::{Args, Automation, Result, ToolError, failed, write_atomic};
 
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
+}
+
+/// The PKCS #11 modules the tools may load: those in `PDFCRAFT_PKCS11_MODULES` (a list of library
+/// paths, written as PATH is) and CloudSigner where its installer puts it. A module is code loaded
+/// into the process, so the user chooses them; a tool's arguments never name one.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn pkcs11_modules() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::env::var_os("PDFCRAFT_PKCS11_MODULES")
+        .map(|v| std::env::split_paths(&v).filter(|p| !p.as_os_str().is_empty()).collect())
+        .unwrap_or_default();
+    for m in sign::pkcs11::known_modules() {
+        if !out.contains(&m) {
+            out.push(m);
+        }
+    }
+    out
+}
+
+/// A token's refusal of its PIN is the caller's to fix; other failures are the tool's.
+#[cfg(not(target_arch = "wasm32"))]
+fn token_error(e: sign::SignError) -> ToolError {
+    match e {
+        sign::SignError::WrongPassword => bad("the token's PIN is incorrect"),
+        e => failed(e),
+    }
+}
+
+/// A signing error: a graphic the signer refuses is the caller's to fix.
+fn sign_error(e: pdfcraft_engine::EditError) -> ToolError {
+    match e {
+        pdfcraft_engine::EditError::Sign(m) if m.starts_with("the signature graphic") => bad(m),
+        e => failed(e),
+    }
 }
 
 /// Seconds since 1970 → a DER time.
@@ -132,6 +168,14 @@ impl Automation {
             #[cfg(not(target_os = "windows"))]
             return Err(failed(format!("windows:{r}: Windows certificate store identities are only available on Windows")));
         }
+        // A PKCS #11 token identity: "pkcs11:<fingerprint>" or "pkcs11:<common name>"; `password`
+        // is the token's PIN when it wants one.
+        if let Some(r) = a.str("id")?.strip_prefix("pkcs11:") {
+            #[cfg(not(target_arch = "wasm32"))]
+            return sign::pkcs11::find(&pkcs11_modules(), &format!("pkcs11:{r}")).map_err(failed)?.open(a.opt_str("password")?).map_err(token_error);
+            #[cfg(target_arch = "wasm32")]
+            return Err(failed(format!("pkcs11:{r}: PKCS #11 tokens aren't available in the browser")));
+        }
         let path = self.resolve(a.str("id")?, false)?;
         let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
         sign::pkcs12::open(&bytes, a.opt_str("password")?.unwrap_or("")).map_err(|e| match e {
@@ -142,6 +186,14 @@ impl Automation {
 
     pub(crate) fn sign_document(&mut self, a: &Args) -> Result<Value> {
         let id = self.open_id(a)?;
+        let (doc_id, opts, out) = self.sign_job(a)?;
+        let signed = self.session.sign(doc_id, &id, opts).map_err(sign_error)?;
+        self.save_signed(a, doc_id, &out, signed)
+    }
+
+    /// One document's signing: what to sign (`doc`, `field` or `page` and `rect`, `certify`,
+    /// `graphic`, `reason`, `location`, `contact`) and where the signed file goes (`out`).
+    fn sign_job(&self, a: &Args) -> Result<(DocId, SignOptions, PathBuf)> {
         let doc = self.doc(a)?;
         let doc_id = doc.id;
         let field = a.opt_str("field")?.map(str::to_string);
@@ -189,17 +241,100 @@ impl Automation {
             graphic,
             ..SignOptions::default()
         };
-        let signed = self.session.sign(doc_id, &id, opts).map_err(|e| match e {
-            // A graphic the signer refuses is the caller's to fix.
-            pdfcraft_engine::EditError::Sign(m) if m.starts_with("the signature graphic") => bad(m),
-            e => failed(e),
-        })?;
-        write_atomic(&out, &signed)?;
+        Ok((doc_id, opts, out))
+    }
+
+    /// Save a signed document to `out`, show it in the session, and describe its new signature.
+    fn save_signed(&mut self, a: &Args, doc_id: DocId, out: &std::path::Path, signed: Arc<Vec<u8>>) -> Result<Value> {
+        write_atomic(out, &signed)?;
         let path = out.to_string_lossy().into_owned();
         self.session.mark_signed(doc_id, signed.clone(), Some(path.clone())).map_err(failed)?;
         let doc = self.doc(a)?;
         let newest = doc.signatures.iter().filter(|s| s.signed).max_by_key(|s| s.revision).cloned();
         Ok(json!({ "path": path, "bytes": signed.len(), "signature": newest.map(|s| self.sig_json(a, &s)).transpose()? }))
+    }
+
+    /// Sign several documents with one digital ID. With a PKCS #11 token the signatures of up to
+    /// 20 documents are made together, so CloudSigner (mSzafir) asks for one approval for them all;
+    /// a document that fails doesn't stop the others.
+    pub(crate) fn sign_documents(&mut self, a: &Args) -> Result<Value> {
+        let jobs = a.get("documents").and_then(Value::as_array).ok_or_else(|| bad("documents must be an array of documents to sign"))?;
+        if jobs.is_empty() || jobs.len() > 1000 {
+            return Err(bad("documents must list 1 to 1000 documents"));
+        }
+        let parsed = jobs.iter().map(|j| self.sign_job(&Args(j))).collect::<Result<Vec<_>>>()?;
+        for (i, (doc, _, out)) in parsed.iter().enumerate() {
+            if parsed.iter().take(i).any(|(d, _, o)| d == doc || o == out) {
+                return Err(bad("each document, and each out file, may appear once"));
+            }
+        }
+        let reference = a.str("id")?;
+        let mut transactions = 0;
+        let results: Vec<std::result::Result<Arc<Vec<u8>>, pdfcraft_engine::EditError>> = if reference.starts_with("pkcs11:") {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let identity = sign::pkcs11::find(&pkcs11_modules(), reference).map_err(failed)?;
+                let pin = a.opt_str("password")?;
+                let mut results = Vec::with_capacity(parsed.len());
+                for chunk in parsed.chunks(sign::pkcs11::MAX_PER_TRANSACTION) {
+                    let tx = sign::pkcs11::Transaction::begin(&identity, pin, chunk.len()).map_err(token_error)?;
+                    let mut batch = Vec::with_capacity(chunk.len());
+                    for (doc, opts, _) in chunk {
+                        batch.push((*doc, tx.digital_id().map_err(failed)?, opts.clone()));
+                    }
+                    drop(tx);
+                    transactions += 1;
+                    results.extend(self.session.sign_together(batch));
+                }
+                results
+            }
+            #[cfg(target_arch = "wasm32")]
+            return Err(failed(format!("{reference}: PKCS #11 tokens aren't available in the browser")));
+        } else {
+            let id = self.open_id(a)?;
+            parsed.iter().map(|(doc, opts, _)| self.session.sign(*doc, &id, opts.clone())).collect()
+        };
+        let mut documents = Vec::with_capacity(parsed.len());
+        let mut signed_count = 0;
+        for ((job, (doc_id, _, out)), result) in jobs.iter().zip(&parsed).zip(results) {
+            let entry = match result.map_err(sign_error).and_then(|signed| self.save_signed(&Args(job), *doc_id, out, signed)) {
+                Ok(v) => {
+                    signed_count += 1;
+                    json!({ "doc": doc_id.0, "result": v })
+                }
+                Err(e) => json!({ "doc": doc_id.0, "error": e.to_string() }),
+            };
+            documents.push(entry);
+        }
+        Ok(json!({ "count": parsed.len(), "signed": signed_count, "transactions": transactions, "documents": documents }))
+    }
+
+    /// The signing identities on the PKCS #11 tokens of the modules the tools may load.
+    pub(crate) fn sign_pkcs11_ids(&self) -> Result<Value> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let modules = pkcs11_modules();
+            let listing = sign::pkcs11::list(&modules);
+            let ids: Vec<Value> = listing
+                .ids
+                .iter()
+                .map(|id| {
+                    json!({
+                        "id": sign::pkcs11::reference(&id.certificate),
+                        "name": id.display_name(),
+                        "token": id.token,
+                        "module": id.module.to_string_lossy(),
+                        "needs_pin": id.needs_pin,
+                        "certificate": cert_json(&id.certificate),
+                    })
+                })
+                .collect();
+            let modules: Vec<String> = modules.iter().map(|m| m.to_string_lossy().into_owned()).collect();
+            let problems: Vec<String> = listing.problems.iter().map(ToString::to_string).collect();
+            Ok(json!({ "count": ids.len(), "ids": ids, "modules": modules, "problems": problems }))
+        }
+        #[cfg(target_arch = "wasm32")]
+        Ok(json!({ "count": 0, "ids": [], "modules": [], "problems": ["PKCS #11 tokens aren't available in the browser"] }))
     }
 
     /// `{"image": path}` (PNG or JPEG), `{"text": name}` (typed in the script font) or

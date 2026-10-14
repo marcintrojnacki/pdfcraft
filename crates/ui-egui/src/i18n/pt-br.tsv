@@ -2058,6 +2058,22 @@
 	Optimizing… writing the copy	Otimizando… gravando a cópia
 	Print single-sided. Keep the sheets in order, cut at the marks, then stack the piles left to right, top to bottom.	Imprima somente na frente. Mantenha as folhas em ordem, corte nas marcas e empilhe as pilhas da esquerda para a direita, de cima para baixo.
 	Windows store  ·  	Repositório do Windows  ·  
+	the certificate expired on {date}	o certificado expirou em {date}
+	Choose the module's library file.	Escolha o arquivo de biblioteca do módulo.
+	{file}: there is no such file.	{file}: esse arquivo não existe.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Os tokens do módulo não contêm nenhuma ID digital com a qual o PdfCraft possa assinar.
+	The device's digital ID isn't available any more; start signing again to list it.	A ID digital do dispositivo não está mais disponível; inicie a assinatura novamente para listá-la.
+	Enter the device's PIN.	Digite o PIN do dispositivo.
+	The PIN is incorrect.	O PIN está incorreto.
+	PKCS #11 device  ·  	Dispositivo PKCS #11  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Usar um dispositivo de criação de assinatura (módulo PKCS #11: cartão inteligente, token, CloudSigner para mSzafir)
+	Module (.dylib, .so, .dll)	Módulo (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	O CloudSigner (mSzafir) é encontrado automaticamente quando está instalado: abra-o e faça login antes de assinar.
+	PKCS #11 module	Módulo PKCS #11
+	PIN	PIN
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	Depois de Assinar, digite o código OTT do app mSzafir na janela do CloudSigner e aprove a assinatura no app. Com o código OTT persistente do CloudSigner ativado, o código é pedido só uma vez a cada poucos minutos.
+	The key is on the device, which signs once it has its PIN.	A chave está no dispositivo, que assina depois de receber o PIN.
+	The key is on the device, which may ask for its PIN itself.	A chave está no dispositivo, que pode pedir o PIN por conta própria.
 	The key is in the Windows certificate store, which may ask to allow PdfCraft to use it.	A chave está no repositório de certificados do Windows, que pode solicitar permissão para o PdfCraft usá-la.
 	This web address mixes letters from different alphabets, a common way to imitate another site's name.	Este endereço da web mistura letras de alfabetos diferentes, uma forma comum de imitar o nome de outro site.
 	This web address uses letters from another alphabet, which can look like familiar ones.	Este endereço da web usa letras de outro alfabeto, que podem parecer familiares.

@@ -32,3 +32,7 @@ flate2.workspace = true
 pdfcraft-model = { workspace = true }
 pdfcraft-xfa = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Sets up a SoftHSM token for the PKCS #11 signing tests.
+cryptoki = "0.12.1"

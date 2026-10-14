@@ -1255,6 +1255,26 @@
 	Width:	Plotis:
 	Window Options	Lango parinktys
 	Windows store  ·  	„Windows“ sertifikatų saugykla  ·  
+	the certificate expired on {date}	sertifikato galiojimas baigėsi {date}
+	Choose the module's library file.	Pasirinkite modulio bibliotekos failą.
+	{file}: there is no such file.	{file}: tokio failo nėra.
+	The module's tokens hold no digital ID PdfCraft can sign with.	Modulio žetonuose nėra skaitmeninio ID, kuriuo „PdfCraft“ galėtų pasirašyti.
+	The device's digital ID isn't available any more; start signing again to list it.	Įrenginio skaitmeninis ID nebepasiekiamas; pradėkite pasirašyti iš naujo, kad jis būtų parodytas.
+	Enter the device's PIN.	Įveskite įrenginio PIN kodą.
+	The PIN is incorrect.	PIN kodas netinkamas.
+	A signature is still waiting for its approval.	Parašas vis dar laukia patvirtinimo.
+	Approve the signature on the device (for mSzafir: in CloudSigner's window and the mSzafir app)…	Patvirtinkite parašą įrenginyje („mSzafir“: „CloudSigner“ lange ir „mSzafir“ programėlėje)…
+	Signed and saved to {path}. The document changed while the signature was being approved; those changes aren't in the signed file.	Pasirašyta ir įrašyta į {path}. Dokumentas pasikeitė, kol buvo tvirtinamas parašas; šių pakeitimų pasirašytame faile nėra.
+	The document wasn't signed: {e}	Dokumentas nepasirašytas: {e}
+	PKCS #11 device  ·  	PKCS #11 įrenginys  ·  
+	Use a signature creation device (PKCS #11 module: smart card, token, CloudSigner for mSzafir)	Naudoti parašo kūrimo įrenginį (PKCS #11 modulis: lustinė kortelė, žetonas, „CloudSigner“, skirtas „mSzafir“)
+	Module (.dylib, .so, .dll)	Modulis (.dylib, .so, .dll)
+	CloudSigner (mSzafir) is found by itself when it is installed: start it and log in before signing.	„CloudSigner“ („mSzafir“) randamas automatiškai, jei įdiegtas: prieš pasirašydami jį paleiskite ir prisijunkite.
+	PKCS #11 module	PKCS #11 modulis
+	PIN	PIN kodas
+	After Sign, enter the OTT code from the mSzafir app in CloudSigner's window and approve the signature in the app. With CloudSigner's persistent OTT code on, the code is asked for only once every few minutes.	Paspaudę „Pasirašyti“, „CloudSigner“ lange įveskite OTT kodą iš „mSzafir“ programėlės ir patvirtinkite parašą programėlėje. Įjungus nuolatinį „CloudSigner“ OTT kodą, kodo prašoma tik kartą per kelias minutes.
+	The key is on the device, which signs once it has its PIN.	Raktas yra įrenginyje, kuris pasirašo gavęs PIN kodą.
+	The key is on the device, which may ask for its PIN itself.	Raktas yra įrenginyje, kuris gali pats paprašyti PIN kodo.
 	Write this email?	Rašyti šį el. laišką?
 	Wrong password	Netinkamas slaptažodis
 	XFA form: its fields and its XFA data are kept in step, so other viewers show what you fill in.	XFA forma: jos laukai ir XFA duomenys sinchronizuojami, todėl kitose žiūryklėse rodoma tai, ką įvedate.
