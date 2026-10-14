@@ -41,6 +41,8 @@ ed25519-dalek = "3.0.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
 getrandom = "0.4"
+# PKCS #11 modules: smart cards, tokens and remote signing services (Apache-2.0).
+cryptoki = "0.12.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Safe Windows certificate store and CNG signing wrappers (MIT OR Apache-2.0).

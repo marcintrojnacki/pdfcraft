@@ -4,6 +4,8 @@
 //!   primitives (RSA private-key operations use aws-lc-rs on native targets, ADR-0009).
 //! - [`pdf`]: signature fields in a document — listing and validating them, and signing
 //!   (PAdES B-B, `ETSI.CAdES.detached`) with an incremental save.
+//! - [`pkcs11`]: digital IDs on PKCS #11 tokens (smart cards, CloudSigner for mSzafir), signed
+//!   with in batches that share one approval.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -16,6 +18,8 @@ pub mod graphic;
 pub mod keychain;
 pub mod keys;
 pub mod pdf;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pkcs11;
 pub mod pkcs12;
 pub mod revocation;
 mod rsa_pad;
